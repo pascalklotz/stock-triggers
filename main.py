@@ -8,7 +8,8 @@ from datetime import datetime
 
 # --- KONFIGURATION ---
 # Das Spreadsheet-ID aus der URL deiner Google Tabelle
-SPREADSHEET_ID = '1k0qv72oN2V6E4NCwYTFjtvcGHNrmiFlczlqa66ke47I'
+
+SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 
 def get_graham_score(ticker_symbol):
     try:
@@ -71,9 +72,8 @@ def main():
     sheet = gc.open_by_key(SPREADSHEET_ID)
     input_ws = sheet.worksheet('stocklist')
     output_ws = sheet.worksheet('Buy-triggers')
-
-    # 3. Ticker holen (Spalte A ab Zeile 2, max 200)
-    tickers = input_ws.col_values(1)[1:201]
+    
+    tickers = [t for t in input_ws.col_values(1)[1:] if t.strip()]
     
     results = []
     for symbol in tickers:
