@@ -24,4 +24,5 @@ jobs:
       - name: Skript ausführen
         env:
           GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
-        run: python main.py
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: python main_triggers.py
