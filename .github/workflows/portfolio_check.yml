@@ -1,0 +1,27 @@
+name: Portfolio Sell Check
+on:
+  schedule:
+    - cron: '30 17 * * *' # Läuft täglich um 17:30 UTC (kurz nach der Analyse)
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install yfinance pandas gspread google-auth numpy
+
+      - name: Run Sell Analysis
+        env:
+          GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: python main_sell.py
