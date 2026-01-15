@@ -31,9 +31,15 @@ class SellScore:
         if not self.data_available: return
         
         # K1: Liquidität
-        ca = self.latest_bs.get('Total Current Assets', 0)
-        cl = self.latest_bs.get('Total Current Liabilities', 1)
-        curr_ratio = ca / cl
+        # --- Robuste Datenabfrage für Current Assets & Liabilities ---
+        # Wir suchen nach verschiedenen möglichen Bezeichnungen
+        ca = (self.latest_bs.get('Total Current Assets') or 
+              self.latest_bs.get('Current Assets') or 0)
+        
+        cl = (self.latest_bs.get('Total Current Liabilities') or 
+              self.latest_bs.get('Current Liabilities') or 1) # Vermeidung Division durch 0
+        
+        curr_ratio = round(ca / cl, 2)
         if curr_ratio < 1.5: self.sell_score += 1
 
         # K2: Verschuldung
@@ -54,47 +60,51 @@ class SellScore:
         if pe * pb > 45: self.sell_score += 1
 
     def get_row(self):
-            self.check_sell_criteria()
+        self.check_sell_criteria()
+        
+        # --- ROHWERTE FÜR DIE INFO-SPALTE SAMMELN ---
+        try:
+            # Liquidität (Current Ratio)
+            ca = (self.latest_bs.get('Total Current Assets') or 
+                  self.latest_bs.get('Current Assets') or 0)
             
-            # --- ROHWERTE FÜR DIE INFO-SPALTE SAMMELN ---
-            try:
-                # Liquidität (Current Ratio)
-                ca = self.latest_bs.get('Total Current Assets', 0)
-                cl = self.latest_bs.get('Total Current Liabilities', 1)
-                cr = round(ca / cl, 2) if cl > 0 else 0
-                
-                # Verschuldung (D/E)
-                debt = self.latest_bs.get('Total Debt', 0)
-                equity = self.latest_bs.get('Stockholders Equity', 1)
-                de = round(debt / equity, 2) if equity != 0 else "INF"
-                
-                # Bewertung (Graham Multiplier)
-                pe = self.info.get('trailingPE') or 0
-                pb = self.info.get('priceToBook') or 0
-                mult = round(pe * pb, 1) if pe and pb else 0
-                
-                # Gewinne (Letzte Jahre)
-                ni_info = "N/A"
-                if 'Net Income' in self.income_statement.index:
-                    ni = self.income_statement.loc['Net Income']
-                    neg_years = (ni <= 0).sum()
-                    ni_info = f"{neg_years} J. neg."
-    
-                # Alle Werte in einen String kombinieren
-                info_text = f"CR: {cr} | D/E: {de} | Mult: {mult} | {ni_info} | P/E: {round(pe,1)}"
-                
-            except Exception as e:
-                info_text = f"Fehler bei Info-Erstellung: {e}"
-    
-            # Rückgabe der Spalten für Google Sheets
-            return [
-                datetime.now().strftime("%d.%m.%Y %H:%M"), # A: Datum
-                self.ticker,                             # B: Ticker
-                self.company_name,                       # C: Name
-                self.sell_score,                         # D: Score
-                "🛑 VERKAUFEN" if self.sell_score >= 3 else "✅ HALTEN", # E: Status
-                info_text                                # F: Die neue Info-Spalte
-            ]
+            cl = (self.latest_bs.get('Total Current Liabilities') or 
+                  self.latest_bs.get('Current Liabilities') or 1) # Vermeidung Division durch 0
+            
+            cr = round(ca / cl, 2) if cl > 0 else 0
+            
+            # Verschuldung (D/E)
+            debt = self.latest_bs.get('Total Debt', 0)
+            equity = self.latest_bs.get('Stockholders Equity', 1)
+            de = round(debt / equity, 2) if equity != 0 else "INF"
+            
+            # Bewertung (Graham Multiplier)
+            pe = self.info.get('trailingPE') or 0
+            pb = self.info.get('priceToBook') or 0
+            mult = round(pe * pb, 1) if pe and pb else 0
+            
+            # Gewinne (Letzte Jahre)
+            ni_info = "N/A"
+            if 'Net Income' in self.income_statement.index:
+                ni = self.income_statement.loc['Net Income']
+                neg_years = (ni <= 0).sum()
+                ni_info = f"{neg_years} J. neg."
+
+            # Alle Werte in einen String kombinieren
+            info_text = f"CR: {cr} | D/E: {de} | Mult: {mult} | {ni_info} | P/E: {round(pe,1)}"
+            
+        except Exception as e:
+            info_text = f"Fehler bei Info-Erstellung: {e}"
+
+        # Rückgabe der Spalten für Google Sheets
+        return [
+            datetime.now().strftime("%d.%m.%Y %H:%M"), # A: Datum
+            self.ticker,                             # B: Ticker
+            self.company_name,                       # C: Name
+            self.sell_score,                         # D: Score
+            "🛑 VERKAUFEN" if self.sell_score >= 3 else "✅ HALTEN", # E: Status
+            info_text                                # F: Die neue Info-Spalte
+        ]
 
 def main():
     # Auth
