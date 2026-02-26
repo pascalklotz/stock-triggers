@@ -6,9 +6,13 @@ import gspread
 import numpy as np
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- KONFIGURATION ---
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
+
 
 class SellScore:
     def __init__(self, ticker):
@@ -17,6 +21,7 @@ class SellScore:
         self.sell_score = 0
         self.evaluations = {}
         self.company_name = "N/A"
+        self.metrics = {}
         try:
             self.info = self.stock.info
             self.balance_sheet = self.stock.balance_sheet
@@ -27,74 +32,60 @@ class SellScore:
         except:
             self.data_available = False
 
-    def check_sell_criteria(self):
+    def calculate_metrics(self):
+        """Berechnet alle Metriken einmalig und speichert sie."""
         if not self.data_available: return
         
-        # K1: Liquidität
-        # --- Robuste Datenabfrage für Current Assets & Liabilities ---
-        # Wir suchen nach verschiedenen möglichen Bezeichnungen
+        # 1. Liquidität
         ca = (self.latest_bs.get('Total Current Assets') or 
               self.latest_bs.get('Current Assets') or 0)
-        
         cl = (self.latest_bs.get('Total Current Liabilities') or 
               self.latest_bs.get('Current Liabilities') or 1) # Vermeidung Division durch 0
         
-        curr_ratio = round(ca / cl, 2)
-        if curr_ratio < 1.5: self.sell_score += 1
+        self.metrics['curr_ratio'] = round(ca / cl, 2)
 
-        # K2: Verschuldung
+        # 2. Verschuldung
         debt = self.latest_bs.get('Total Debt', 0)
         equity = self.latest_bs.get('Stockholders Equity', 1)
-        if equity <= 0 or (debt / equity) > 2.0: self.sell_score += 1
+        self.metrics['debt_equity'] = round(debt / equity, 2) if equity > 0 else float('inf')
 
-        # K3/K4: Gewinne
+        # 3. Gewinne
+        self.metrics['neg_years'] = 0
+        self.metrics['declining_growth'] = False
         try:
-            ni = self.income_statement.loc['Net Income']
-            if (ni <= 0).sum() >= 2: self.sell_score += 1 # K3: Verlustjahre
-            if ni.iloc[0] < ni.iloc[-1]: self.sell_score += 1 # K4: Negatives Wachstum
-        except: pass
-
-        # K5: Überbewertung
-        pe = self.info.get('trailingPE', 0)
-        pb = self.info.get('priceToBook', 0)
-        if pe * pb > 45: self.sell_score += 1
-
-    def get_row(self):
-        self.check_sell_criteria()
-        
-        # --- ROHWERTE FÜR DIE INFO-SPALTE SAMMELN ---
-        try:
-            # Liquidität (Current Ratio)
-            ca = (self.latest_bs.get('Total Current Assets') or 
-                  self.latest_bs.get('Current Assets') or 0)
-            
-            cl = (self.latest_bs.get('Total Current Liabilities') or 
-                  self.latest_bs.get('Current Liabilities') or 1) # Vermeidung Division durch 0
-            
-            cr = round(ca / cl, 2) if cl > 0 else 0
-            
-            # Verschuldung (D/E)
-            debt = self.latest_bs.get('Total Debt', 0)
-            equity = self.latest_bs.get('Stockholders Equity', 1)
-            de = round(debt / equity, 2) if equity != 0 else "INF"
-            
-            # Bewertung (Graham Multiplier)
-            pe = self.info.get('trailingPE') or 0
-            pb = self.info.get('priceToBook') or 0
-            mult = round(pe * pb, 1) if pe and pb else 0
-            
-            # Gewinne (Letzte Jahre)
-            ni_info = "N/A"
             if 'Net Income' in self.income_statement.index:
                 ni = self.income_statement.loc['Net Income']
-                neg_years = (ni <= 0).sum()
-                ni_info = f"{neg_years} J. neg."
+                self.metrics['neg_years'] = (ni <= 0).sum()
+                # iloc[0] ist aktuell, iloc[-1] ist alt. Wenn aktuell < alt, dann Rückgang.
+                if len(ni) > 1 and ni.iloc[0] < ni.iloc[-1]:
+                    self.metrics['declining_growth'] = True
+        except: pass
 
-            # Alle Werte in einen String kombinieren
-            info_text = f"CR: {cr} | D/E: {de} | Mult: {mult} | {ni_info} | P/E: {round(pe,1)}"
-            
-        except Exception as e:
-            info_text = f"Fehler bei Info-Erstellung: {e}"
+        # 4. Bewertung
+        pe = self.info.get('trailingPE', 0)
+        pb = self.info.get('priceToBook', 0)
+        self.metrics['graham_mult'] = round(pe * pb, 1) if pe and pb else 0
+        self.metrics['pe'] = round(pe, 1) if pe else 0
+
+    def check_sell_criteria(self):
+        if not self.data_available: return
+        
+        self.sell_score = 0 # Reset Score
+        
+        if self.metrics.get('curr_ratio', 0) < 1.5: self.sell_score += 1
+        if self.metrics.get('debt_equity', 0) > 2.0: self.sell_score += 1
+        if self.metrics.get('neg_years', 0) >= 2: self.sell_score += 1
+        if self.metrics.get('declining_growth', False): self.sell_score += 1
+        if self.metrics.get('graham_mult', 0) > 45: self.sell_score += 1
+
+    def get_row(self):
+        self.calculate_metrics()
+        self.check_sell_criteria()
+        
+        # Info Text aus berechneten Metriken bauen
+        m = self.metrics
+        ni_info = f"{m.get('neg_years', 0)} J. neg."
+        info_text = f"CR: {m.get('curr_ratio')} | D/E: {m.get('debt_equity')} | Mult: {m.get('graham_mult')} | {ni_info} | P/E: {m.get('pe')}"
 
         # Rückgabe der Spalten für Google Sheets
         return [

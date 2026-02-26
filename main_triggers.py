@@ -3,18 +3,23 @@ import json
 import yfinance as yf
 import pandas as pd
 import gspread
+import logging
+from typing import Optional, List, Any
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 from dotenv import load_dotenv
 
+# --- SETUP LOGGING ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 
-# --- KONFIGURATION ---
-# Das Spreadsheet-ID aus der URL deiner Google Tabelle
 
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 
-def get_graham_score(ticker_symbol):
+def get_graham_score(ticker_symbol: str) -> Optional[List[Any]]:
+    """Calculates the Graham Score and other metrics for a given ticker."""
     try:
         stock = yf.Ticker(ticker_symbol)
         info = stock.info
@@ -27,31 +32,49 @@ def get_graham_score(ticker_symbol):
         cf = stock.cashflow
         
         if financials.empty or bs.empty:
+            logger.warning(f"Keine Finanzdaten für {ticker_symbol}")
             return None
 
         # --- TEIL A: GRAHAM SCORE (0-7) ---
         graham_score = 0
+        
+        # 1. Größe: Mindestens 2 Mrd. $ Marktkapitalisierung als moderner Wert für "adäquate Größe".
         mcap = info.get('marketCap', 0)
-        if mcap >= 2_000_000_000: graham_score += 1 # 1. Größe
+        if mcap >= 2_000_000_000: graham_score += 1
         
         latest_bs = bs.iloc[:, 0]
         ca = latest_bs.get('Total Current Assets', 0)
         cl = latest_bs.get('Total Current Liabilities', 0)
-        if cl > 0 and (ca / cl) >= 2.0: graham_score += 1 # 2. Liquidität
+        # 2. Finanzielle Stärke (Liquidität): Current Ratio (Umlaufvermögen / kurzfr. Verbindlichkeiten) >= 2.
+        if cl > 0 and (ca / cl) >= 2.0: graham_score += 1
         
+        # 3. Finanzielle Stärke (Schulden): Langfristige Schulden dürfen das Nettoumlaufvermögen (Working Capital) nicht übersteigen.
+        # Wir verwenden 'Long Term Debt', falls verfügbar, ansonsten 'Total Debt' als Fallback.
+        work_cap = ca - cl
         debt = latest_bs.get('Total Debt', 0)
-        if debt < (ca - cl): graham_score += 1 # 3. Schulden vs. Working Cap
+        long_term_debt = latest_bs.get('Long Term Debt', debt)
+        if work_cap > 0 and long_term_debt < work_cap: graham_score += 1
         
+        net_inc = None
         if 'Net Income' in financials.index:
             net_inc = financials.loc['Net Income']
-            if (net_inc > 0).all(): graham_score += 1 # 4. Stabilität
-            if len(net_inc) >= 3 and net_inc.iloc[0] > net_inc.iloc[-1]: graham_score += 1 # 6. Wachstum
+            # 4. Gewinnstabilität: In den letzten verfügbaren Jahren (yfinance liefert ~4) durchgehend Gewinne. Graham forderte 10 Jahre.
+            if (net_inc > 0).all(): graham_score += 1
             
-        if info.get('dividendYield', 0) > 0: graham_score += 1 # 5. Dividende
+        # 5. Dividendenbilanz: Das Unternehmen zahlt eine Dividende. Graham forderte 20 Jahre ununterbrochene Zahlungen.
+        if info.get('dividendYield', 0) > 0: graham_score += 1
         
+        if net_inc is not None:
+            # 6. Gewinnwachstum: Mindestens 33% Gewinnwachstum über den verfügbaren Zeitraum.
+            # Graham forderte 1/3 über 10 Jahre. Dies ist eine Anpassung an die verfügbaren Daten.
+            if len(net_inc) > 1 and net_inc.iloc[-1] > 0: # Prüfe, ob das Basisjahr positiv war
+                if net_inc.iloc[0] >= net_inc.iloc[-1] * 1.33:
+                    graham_score += 1
+        
+        # 7. Moderate Bewertung: KGV (P/E) <= 15, KBV (P/B) <= 1.5 und KGV * KBV <= 22.5.
         pe = info.get('trailingPE') or 0
         pb = info.get('priceToBook') or 0
-        if 0 < pe <= 15 and 0 < pb <= 1.5 and (pe * pb) <= 22.5: graham_score += 1 # 7. Multiplier
+        if 0 < pe <= 15 and 0 < pb <= 1.5 and (pe * pb) <= 22.5: graham_score += 1
 
         # --- TEIL B: BONUS QUALITY SCORE (0-3) ---
         bonus_score = 0
@@ -102,14 +125,14 @@ def get_graham_score(ticker_symbol):
         ]
 
     except Exception as e:
-        print(f"Fehler bei {ticker_symbol}: {e}")
+        logger.error(f"Fehler bei {ticker_symbol}: {e}", exc_info=True)
         return None
         
 def main():
     # 1. Authentifizierung über GitHub Secret
     creds_json = os.getenv('GOOGLE_CREDS_JSON')
     if not creds_json:
-        print("Fehler: GOOGLE_CREDS_JSON nicht gefunden.")
+        logger.critical("Fehler: GOOGLE_CREDS_JSON nicht gefunden.")
         return
 
     creds_dict = json.loads(creds_json)
@@ -127,7 +150,7 @@ def main():
     results = []
     for symbol in tickers:
         if not symbol: continue
-        print(f"Verarbeite: {symbol}")
+        logger.info(f"Verarbeite: {symbol}")
         data = get_graham_score(symbol.strip())
         if data:
             results.append(data)
@@ -135,7 +158,7 @@ def main():
     # 4. Ergebnisse gesammelt schreiben
     if results:
         output_ws.append_rows(results, value_input_option='USER_ENTERED')
-        print(f"Erfolgreich {len(results)} Zeilen hinzugefügt.")
+        logger.info(f"Erfolgreich {len(results)} Zeilen hinzugefügt.")
 
 if __name__ == "__main__":
     main()
