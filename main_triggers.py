@@ -5,6 +5,9 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- KONFIGURATION ---
 # Das Spreadsheet-ID aus der URL deiner Google Tabelle
