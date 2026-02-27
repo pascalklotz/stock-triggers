@@ -18,7 +18,8 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install yfinance pandas gspread google-auth numpy
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run Sell Analysis
         env:
