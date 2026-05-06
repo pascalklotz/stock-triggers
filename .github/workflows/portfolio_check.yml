@@ -1,7 +1,7 @@
 name: Portfolio Sell Check
 on:
   schedule:
-    - cron: '30 17 * * *' # Läuft täglich um 17:30 UTC (kurz nach der Analyse)
+    - cron: '30 16 * * *' # Läuft täglich um 17:30 UTC (kurz nach der Analyse)
   workflow_dispatch:
 
 jobs:
