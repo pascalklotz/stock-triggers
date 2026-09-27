@@ -4,4 +4,4 @@ gspread
 google-auth
 pandas
 numpy
-dotenv
+python-dotenv
