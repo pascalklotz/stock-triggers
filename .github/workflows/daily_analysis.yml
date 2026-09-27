@@ -1,7 +1,7 @@
 name: Stock Analysis
 on:
   schedule:
-    - cron: '0 17 * * *' # Täglich um 17:00 UTC (ca. 18:00 Uhr DE)
+    - cron: '0 16 * * *' # Täglich um 17:00 UTC (ca. 18:00 Uhr DE)
   workflow_dispatch: # Erlaubt manuellen Start per Button
 
 jobs:
